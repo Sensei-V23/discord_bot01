@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบเช็คชื่อแคลน - Dashboard</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+
+    <!-- Header / Navbar -->
+    <nav class="bg-slate-800/80 backdrop-blur border-b border-slate-700 sticky top-0 z-50 px-6 py-4">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="Clan Logo" class="w-10 h-10 rounded-full border border-sky-500/40 object-cover shadow-lg" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
+                <div>
+                    <h1 class="text-xl font-bold text-sky-400">ระบบเช็คชื่อแคลน</h1>
+                    <p class="text-xs text-slate-400">Clan Attendance Dashboard</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <a href="{{ url_for('dashboard') }}" class="text-sky-400 font-semibold text-sm hover:underline">📊 สรุปผล</a>
+                <a href="{{ url_for('members_management') }}" class="text-slate-300 hover:text-white text-sm">👥 จัดการสมาชิก</a>
+                <a href="{{ url_for('review_absent') }}" class="text-slate-300 hover:text-white text-sm">⚠️ ตรวจสอบคนขาด</a>
+                <a href="{{ url_for('export_csv') }}" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">📥 โหลด CSV</a>
+                <a href="{{ url_for('logout') }}" class="bg-red-600/80 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">🚪 ออกจากระบบ</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="max-w-7xl mx-auto px-6 py-8">
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}
+              <div class="mb-6 p-4 rounded-xl bg-sky-900/50 border border-sky-500/50 text-sky-200 text-sm shadow-md">
+                {{ message }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-white">📊 สรุปผลการเช็คชื่อสมาชิก</h2>
+            <form method="GET" class="flex gap-2 items-center">
+                <label class="text-sm text-slate-400">เดือน:</label>
+                <select name="month" onchange="this.form.submit()" class="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500">
+                    {% for m in months %}
+                        <option value="{{ m }}" {% if m == current_month %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+
+        <!-- ตารางสรุปผลประจำเดือน -->
+        <div class="bg-slate-800/60 border border-slate-700/80 rounded-2xl overflow-hidden shadow-xl mb-10">
+            <table class="w-full text-left text-sm text-slate-300">
+                <thead class="bg-slate-800 text-slate-400 border-b border-slate-700 text-xs uppercase">
+                    <tr>
+                        <th class="px-6 py-4">ชื่อสมาชิก Discord</th>
+                        <th class="px-6 py-4 text-center">✅ มา</th>
+                        <th class="px-6 py-4 text-center">📌 ลา</th>
+                        <th class="px-6 py-4 text-center">❌ ขาด</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/50">
+                    {% for row in summary %}
+                    <tr class="hover:bg-slate-700/30 transition">
+                        <td class="px-6 py-4 font-semibold text-white">{{ row[1] }}</td>
+                        <td class="px-6 py-4 text-center text-emerald-400 font-bold">{{ row[2] }}</td>
+                        <td class="px-6 py-4 text-center text-amber-400 font-bold">{{ row[3] }}</td>
+                        <td class="px-6 py-4 text-center text-rose-400 font-bold">{{ row[4] }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="px-6 py-8 text-center text-slate-500">ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- หัวข้อ และ Dropdown เลือกวันที่ -->
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold text-white">📜 รายการลงชื่อประจำวันที่</h3>
+            
+            <form method="GET" class="flex gap-2 items-center">
+                <input type="hidden" name="month" value="{{ current_month }}">
+                <label class="text-sm text-slate-400">เลือกวันที่:</label>
+                <select name="filter_date" onchange="this.form.submit()" class="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500">
+                    {% for d in available_dates %}
+                        <option value="{{ d }}" {% if d == selected_date %}selected{% endif %}>{{ d }}</option>
+                    {% else %}
+                        <option value="">-- ไม่มีข้อมูลการเช็คชื่อ --</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+
+        <!-- ตารางแสดงประวัติลงชื่อเฉพาะวันที่เลือก -->
+        <div class="bg-slate-800/60 border border-slate-700/80 rounded-2xl overflow-hidden shadow-xl">
+            <table class="w-full text-left text-sm text-slate-300">
+                <thead class="bg-slate-800 text-slate-400 border-b border-slate-700 text-xs uppercase">
+                    <tr>
+                        <th class="px-6 py-4">วันที่</th>
+                        <th class="px-6 py-4">ชื่อสมาชิก</th>
+                        <th class="px-6 py-4">สถานะ</th>
+                        <th class="px-6 py-4">หมายเหตุ</th>
+                        <th class="px-6 py-4 text-right">จัดการ</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/50">
+                    {% for log in logs %}
+                    <tr class="hover:bg-slate-700/30 transition">
+                        <td class="px-6 py-4 text-slate-400">{{ log[5] }}</td>
+                        <td class="px-6 py-4 font-medium text-white">{{ log[1] }}</td>
+                        <td class="px-6 py-4">
+                            {% if log[2] == 'มา' %}
+                                <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full text-xs font-semibold">✅ มา</span>
+                            {% elif log[2] == 'ลา' %}
+                                <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-full text-xs font-semibold">📌 ลา</span>
+                            {% else %}
+                                <span class="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-1 rounded-full text-xs font-semibold">❌ ขาด</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 text-slate-400">{{ log[3] if log[3] else '-' }}</td>
+                        <td class="px-6 py-4 text-right flex justify-end gap-2">
+                            <!-- ปุ่มแก้ไข -->
+                            <button type="button" 
+                                    data-id="{{ log[0] }}"
+                                    data-username="{{ log[1] }}"
+                                    data-status="{{ log[2] }}"
+                                    data-note="{{ log[3] if log[3] else '' }}"
+                                    data-date="{{ log[5] }}"
+                                    onclick="openEditModalFromButton(this)" 
+                                    class="text-sky-400 hover:text-sky-300 text-xs font-medium bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20 hover:bg-sky-500/20 transition">✏️ แก้ไข</button>
+                            
+                            <!-- ปุ่มลบ -->
+                            <form action="{{ url_for('delete_log', log_id=log[0]) }}" method="POST" onsubmit="return confirm('ยืนยันลบรายการนี้?');" class="inline">
+                                <input type="hidden" name="current_month" value="{{ current_month }}">
+                                <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs font-medium bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 hover:bg-rose-500/20 transition">🗑️ ลบ</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="px-6 py-8 text-center text-slate-500">ไม่มีประวัติการเช็คชื่อในวันที่เลือก</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal ป๊อบอัพแก้ไขข้อมูล -->
+    <div id="editModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl text-slate-100">
+            <h3 class="text-lg font-bold text-white mb-4">✏️ แก้ไขรายการลงชื่อ</h3>
+            <form action="{{ url_for('update_log') }}" method="POST" class="space-y-4">
+                <input type="hidden" id="edit_log_id" name="log_id">
+                <input type="hidden" name="current_month" value="{{ current_month }}">
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">ชื่อสมาชิก</label>
+                    <input type="text" id="edit_username" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-400 text-sm" readonly>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">วันที่ (เช่น 16/10/2026)</label>
+                    <input type="text" id="edit_date_display" name="date_display" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-sky-500" required>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">สถานะ</label>
+                    <select id="edit_status" name="status" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-sky-500">
+                        <option value="มา">✅ มา</option>
+                        <option value="ลา">📌 ลา</option>
+                        <option value="ขาด">❌ ขาด</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">หมายเหตุ / สาเหตุ</label>
+                    <textarea id="edit_note" name="note" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-sky-500" placeholder="ระบุเหตุผล..."></textarea>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-2">
+                    <button type="button" onclick="closeEditModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm transition">ยกเลิก</button>
+                    <button type="submit" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg text-sm transition">💾 บันทึก</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openEditModalFromButton(btn) {
+            const id = btn.getAttribute('data-id');
+            const username = btn.getAttribute('data-username');
+            const status = btn.getAttribute('data-status');
+            const note = btn.getAttribute('data-note');
+            const dateDisplay = btn.getAttribute('data-date');
+
+            document.getElementById('edit_log_id').value = id;
+            document.getElementById('edit_username').value = username;
+            document.getElementById('edit_status').value = status;
+            document.getElementById('edit_note').value = note;
+            document.getElementById('edit_date_display').value = dateDisplay;
+            
+            const modal = document.getElementById('editModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeEditModal() {
+            const modal = document.getElementById('editModal');
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+        }
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,6 @@
+git+https://github.com/Rapptz/discord.py
+Flask==3.0.0
+gunicorn==21.2.0
+pymysql
+APScheduler
+cryptography

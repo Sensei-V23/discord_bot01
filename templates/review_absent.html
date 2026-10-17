@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ตรวจดูคนไม่มาเช็คชื่อวันนี้ - Clan Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+    <style> body { font-family: 'Kanit', sans-serif; } </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-6">
+    <div class="max-w-4xl mx-auto space-y-8">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-amber-400">👀 รายชื่อสมาชิกที่ยังไม่ได้เช็คชื่อ</h1>
+                <p class="text-slate-400 text-sm mt-1">ประจำวันที่: <span class="text-sky-400 font-bold">{{ today_disp }}</span></p>
+            </div>
+            <div>
+                <a href="/" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+                    ⬅️ กลับหน้าหลัก Dashboard
+                </a>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="bg-sky-500/10 border border-sky-500/30 text-sky-300 p-4 rounded-xl text-sm font-medium">
+              {% for message in messages %}
+                <p>{{ message }}</p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <!-- ปุ่มกดขาดทั้งหมด -->
+        <div class="bg-slate-800/60 backdrop-blur rounded-xl p-6 border border-slate-700/50 shadow-xl flex items-center justify-between">
+            <div>
+                <h2 class="text-lg font-semibold text-slate-200">จัดการรวดเดียวทั้งหมด</h2>
+                <p class="text-slate-400 text-xs mt-0.5">กดปุ่มนี้เพื่อบันทึกสถานะ 'ขาด' ให้ทุกคนที่ยังไม่เช็คชื่อของวันนี้ทันที</p>
+            </div>
+            <form action="{{ url_for('mark_absent_action') }}" method="POST" onsubmit="return confirm('⚠️ คุณต้องการบันทึกสถานะ \'ขาด\' ให้กับสมาชิกที่ยังไม่เช็คชื่อทั้งหมดในวันนี้ใช่หรือไม่?');">
+                <input type="hidden" name="action_type" value="all">
+                <button type="submit" class="bg-rose-600 hover:bg-rose-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg transition shadow-lg">
+                    ❌ เช็ค 'ขาด' ทั้งหมด
+                </button>
+            </form>
+        </div>
+
+        <!-- ตารางแสดงรายชื่อคนที่ยังไม่เช็ค -->
+        <div class="bg-slate-800/60 backdrop-blur rounded-xl p-6 border border-slate-700/50 shadow-xl">
+            <h2 class="text-lg font-semibold text-sky-300 mb-4">📋 รายชื่อผู้ที่ยังไม่เช็คชื่อวันนี้ ({{ not_checked|length }} คน)</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-700 text-slate-400">
+                            <th class="py-3 px-4">ชื่อใน Discord</th>
+                            <th class="py-3 px-4">Discord User ID</th>
+                            <th class="py-3 px-4 text-center">จัดการ (กดเช็คขาดทีละคน)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700/50">
+                        {% for member in not_checked %}
+                        <tr class="hover:bg-slate-700/30 transition">
+                            <td class="py-3 px-4 font-bold text-slate-200">{{ member.discord_tag }}</td>
+                            <td class="py-3 px-4 text-slate-400 font-mono text-xs">{{ member.user_id }}</td>
+                            <td class="py-3 px-4 text-center">
+                                <form method="POST" action="/mark_absent_action" style="display: inline;">
+                                    <input type="hidden" name="action_type" value="single">
+                                    <input type="hidden" name="user_id" value="{{ member.user_id }}">
+                                    <button type="submit" class="bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 text-xs font-semibold px-4 py-1.5 rounded-lg transition">
+                                        ❌ เช็ค 'ขาด' คนนี้
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-center py-8 text-emerald-400 font-semibold">🎉 ยอดเยี่ยม! สมาชิกทุกคนมาเช็คชื่อครบเรียบร้อยแล้วในวันนี้</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
