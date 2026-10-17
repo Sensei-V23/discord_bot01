@@ -2,8 +2,9 @@ import os
 import threading
 import asyncio
 from datetime import datetime, timedelta
+import zoneinfo
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response
 import pymysql
 
@@ -76,9 +77,20 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# 🕒 ฟังก์ชันดึงเวลาที่ตัดรอบตี 3 อัตโนมัติ (00:00 - 02:59 นับเป็นวันก่อนหน้า)
+def get_thai_now():
+    try:
+        now = datetime.now(zoneinfo.ZoneInfo("Asia/Bangkok"))
+    except Exception:
+        now = datetime.now() + timedelta(hours=7)
+    
+    if now.hour < 3:
+        now = now - timedelta(days=1)
+    return now
+
 def parse_date_input(date_str):
     if not date_str:
-        now = datetime.now()
+        now = get_thai_now()
         return now.strftime("%Y-%m-%d"), now.strftime("%d/%m/%Y"), now.strftime("%Y-%m")
     
     date_str = date_str.strip()
@@ -98,8 +110,125 @@ def parse_date_input(date_str):
     except Exception:
         pass
     
-    now = datetime.now()
+    now = get_thai_now()
     return now.strftime("%Y-%m-%d"), now.strftime("%d/%m/%Y"), now.strftime("%Y-%m")
+
+def get_member_name(cursor, user_id, fallback_name):
+    cursor.execute("SELECT discord_tag FROM members WHERE user_id = %s", (user_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        return row[0]
+    return fallback_name
+
+class AdminManualCheckModal(discord.ui.Modal, title="📝 เช็คชื่อให้สมาชิก (แอดมิน)"):
+    def __init__(self, selected_user_id, selected_username):
+        super().__init__()
+        self.selected_user_id = selected_user_id
+        self.selected_username = selected_username
+
+    user_id_input = discord.ui.TextInput(
+        label="Discord User ID",
+        placeholder="ระบบใส่ให้แล้ว หรือแก้ไขได้...",
+        required=True,
+        max_length=50
+    )
+    status_input = discord.ui.TextInput(
+        label="สถานะ (พิมพ์: มา, ลา, ขาด)",
+        placeholder="มา / ลา / ขาด",
+        required=True,
+        max_length=10
+    )
+    date_input = discord.ui.TextInput(
+        label="วันที่ (เว้นว่างเพื่อใช้วันนี้)",
+        placeholder="เช่น 16/10/2026",
+        required=False,
+        max_length=20
+    )
+    note_input = discord.ui.TextInput(
+        label="สาเหตุ / หมายเหตุ (ถ้ามี)",
+        placeholder="ระบุสาเหตุ...",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=200
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        uid = self.user_id_input.value.strip()
+        status = self.status_input.value.strip()
+
+        if status not in ["มา", "ลา", "ขาด"]:
+            await interaction.response.send_message("❌ กรุณากรอกสถานะให้ถูกต้องพิมพ์ได้เฉพาะ: **มา**, **ลา**, หรือ **ขาด**", ephemeral=True)
+            return
+
+        target_date_db, target_date_disp, month_year = parse_date_input(self.date_input.value)
+        note = self.note_input.value.strip() or None
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        uname = get_member_name(cursor, uid, self.selected_username)
+
+        cursor.execute("SELECT id FROM attendance WHERE user_id = %s AND date = %s", (uid, target_date_db))
+        row = cursor.fetchone()
+
+        if row:
+            cursor.execute("UPDATE attendance SET username = %s, status = %s, note = %s WHERE user_id = %s AND date = %s", (uname, status, note, uid, target_date_db))
+            conn.commit()
+            conn.close()
+            await interaction.response.send_message(f"✅ อัปเดตสถานะเป็น **{status}** ให้ **{uname}** (วันที่ {target_date_disp}) เรียบร้อย!", ephemeral=True)
+        else:
+            cursor.execute("INSERT INTO attendance (user_id, username, status, note, date, date_display, month_year) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                           (uid, uname, status, note, target_date_db, target_date_disp, month_year))
+            conn.commit()
+            conn.close()
+            await interaction.response.send_message(f"✅ บันทึกสถานะ **{status}** ให้ **{uname}** (วันที่ {target_date_disp}) เรียบร้อย!", ephemeral=True)
+
+class AdminSelectMemberView(discord.ui.View):
+    def __init__(self, guild):
+        super().__init__(timeout=60)
+        options = []
+        
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id, discord_tag FROM members ORDER BY discord_tag ASC")
+            db_members = cursor.fetchall()
+            conn.close()
+            
+            for uid, tag in db_members:
+                options.append(discord.SelectOption(
+                    label=tag,
+                    value=f"{uid}|{tag}",
+                    description=f"ID: {uid}"
+                ))
+                if len(options) >= 25:
+                    break
+        except Exception as e:
+            print(f"Error fetching members for dropdown: {e}")
+
+        if not options:
+            for member in guild.members:
+                if not member.bot:
+                    options.append(discord.SelectOption(
+                        label=member.display_name,
+                        value=f"{member.id}|{member.display_name}",
+                        description=f"ID: {member.id}"
+                    ))
+                    if len(options) >= 25:
+                        break
+
+        if not options:
+            options.append(discord.SelectOption(label="ไม่พบสมาชิก", value="0|Unknown"))
+
+        self.select_member = discord.ui.Select(placeholder="👤 เลือกสมาชิกที่ต้องการเช็คชื่อ...", options=options)
+        self.select_member.callback = self.member_callback
+        self.add_item(self.select_member)
+
+    async def member_callback(self, interaction: discord.Interaction):
+        val = self.select_member.values[0]
+        uid, uname = val.split("|")
+        modal = AdminManualCheckModal(uid, uname)
+        modal.user_id_input.default = uid
+        await interaction.response.send_modal(modal)
 
 class LeaveModal(discord.ui.Modal):
     def __init__(self, target_date_db, target_date_disp, month_year):
@@ -118,11 +247,13 @@ class LeaveModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
-        username = interaction.user.display_name
+        raw_username = interaction.user.display_name
         note = self.reason.value
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        username = get_member_name(cursor, user_id, raw_username)
+
         cursor.execute("SELECT id FROM attendance WHERE user_id = %s AND date = %s", (user_id, self.target_date_db))
         row = cursor.fetchone()
 
@@ -135,7 +266,7 @@ class LeaveModal(discord.ui.Modal):
                        (user_id, username, note, self.target_date_db, self.target_date_disp, self.month_year))
         conn.commit()
         conn.close()
-        await interaction.response.send_message(f"📌 บันทึกการ **ลา** (วันที่ {self.target_date_disp}) เรียบร้อยครับ!", ephemeral=True)
+        await interaction.response.send_message(f"📌 บันทึกการ **ลา** (วันที่ {self.target_date_disp}) ให้คุณ **{username}** เรียบร้อยครับ!", ephemeral=True)
 
 class DirectAttendanceView(discord.ui.View):
     def __init__(self, target_date_db, target_date_disp, month_year):
@@ -147,10 +278,12 @@ class DirectAttendanceView(discord.ui.View):
     @discord.ui.button(label="✅ มา", style=discord.ButtonStyle.green, custom_id="btn_come_direct")
     async def come_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
-        username = interaction.user.display_name
+        raw_username = interaction.user.display_name
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        username = get_member_name(cursor, user_id, raw_username)
+
         cursor.execute("SELECT id FROM attendance WHERE user_id = %s AND date = %s", (user_id, self.target_date_db))
         row = cursor.fetchone()
 
@@ -190,7 +323,6 @@ async def send_attendance_summary(guild, target_date_db, target_date_disp):
     sum_ch_row = cursor.fetchone()
     cursor.execute("SELECT `value` FROM settings WHERE `key` = 'clan_role_id'")
     role_row = cursor.fetchone()
-    conn.close()
 
     checked_user_ids = {r[0] for r in records}
     not_checked_mentions = []
@@ -202,9 +334,11 @@ async def send_attendance_summary(guild, target_date_db, target_date_disp):
                     not_checked_mentions.append(member.mention)
 
     embed = discord.Embed(title=f"📊 สรุปผลการเช็คชื่อ ประจำวันที่ {target_date_disp}", color=discord.Color.gold())
-    come_text = "\n".join([f"• {r[1]}" for r in records if r[2] == 'มา']) or "ไม่มี"
-    leave_text = "\n".join([f"• {r[1]} (เหตุผล: {r[3] if r[3] else '-'})" for r in records if r[2] == 'ลา']) or "ไม่มี"
+    come_text = "\n".join([f"• {get_member_name(cursor, r[0], r[1])}" for r in records if r[2] == 'มา']) or "ไม่มี"
+    leave_text = "\n".join([f"• {get_member_name(cursor, r[0], r[1])} (เหตุผล: {r[3] if r[3] else '-'})" for r in records if r[2] == 'ลา']) or "ไม่มี"
     not_checked_text = " ".join(not_checked_mentions) if not_checked_mentions else "ไม่มี (เช็คครบทุกคนแล้ว!)"
+
+    conn.close()
 
     embed.add_field(name="✅ มาเช็คชื่อ", value=come_text, inline=False)
     embed.add_field(name="📌 ลาหยุด", value=leave_text, inline=False)
@@ -224,7 +358,7 @@ async def disable_attendance_message(msg, guild):
     
     orig_embed = msg.embeds[0] if msg.embeds else None
     target_date_disp = ""
-    target_date_db = datetime.now().strftime("%Y-%m-%d")
+    target_date_db, target_date_disp_default, _ = parse_date_input("")
 
     if orig_embed:
         embed = orig_embed.copy()
@@ -242,7 +376,7 @@ async def disable_attendance_message(msg, guild):
     else:
         await msg.edit(view=disabled_view)
 
-    await send_attendance_summary(guild, target_date_db, target_date_disp if target_date_disp else datetime.now().strftime("%d/%m/%Y"))
+    await send_attendance_summary(guild, target_date_db, target_date_disp if target_date_disp else target_date_disp_default)
 
     async def delete_after_30_mins():
         await asyncio.sleep(1800)
@@ -270,13 +404,15 @@ class SelectMessageToCloseView(discord.ui.View):
         self.add_item(select)
 
     async def select_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
         msg_id = int(interaction.data["values"][0])
         try:
             msg = await self.target_channel.fetch_message(msg_id)
             await disable_attendance_message(msg, self.guild)
-            await interaction.response.send_message("🔒 ปิดรับเช็คชื่อและส่งสรุปผลเรียบร้อยแล้ว!", ephemeral=True)
+            await interaction.followup.send("🔒 ปิดรับเช็คชื่อและส่งสรุปผลเรียบร้อยแล้ว!", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ เกิดข้อผิดพลาดไม่พบข้อความ: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ เกิดข้อผิดพลาดไม่พบข้อความ: {e}", ephemeral=True)
 
 class ChannelSelectView(discord.ui.View):
     def __init__(self):
@@ -372,6 +508,13 @@ class AdminControlView(discord.ui.View):
             return
         await interaction.response.send_message("🏷️ กรุณาเลือกยศแคลน หรือกดปุ่มพิมพ์ ID ยศ:", view=SetRoleSelectView(), ephemeral=True)
 
+    @discord.ui.button(label="📝 เช็คชื่อให้สมาชิก", style=discord.ButtonStyle.primary, custom_id="admin_manual_check")
+    async def manual_check(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ คุณไม่มีสิทธิ์ใช้ปุ่มนี้", ephemeral=True)
+            return
+        await interaction.response.send_message("📝 กรุณาเลือกสมาชิกที่ต้องการเช็คชื่อ:", view=AdminSelectMemberView(interaction.guild), ephemeral=True)
+
     @discord.ui.button(label="🟢 เปิดเช็คชื่อทันที", style=discord.ButtonStyle.success, custom_id="admin_open_today")
     async def open_today(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
@@ -401,11 +544,14 @@ class AdminControlView(discord.ui.View):
         await target_channel.send(embed=embed, view=view)
         await interaction.response.send_message(f"🟢 เปิดระบบเช็คชื่อ (วันที่ปัจจุบัน {target_date_disp}) เรียบร้อย!", ephemeral=True)
 
-    @discord.ui.button(label="🔒 ปิดรับเช็คชื่อ (เลือกรายการ)", style=discord.ButtonStyle.danger, custom_id="admin_close_check")
+    @discord.ui.button(label="🔒 ปิดรับเช็คชื่อ", style=discord.ButtonStyle.danger, custom_id="admin_close_check")
     async def close_check(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ คุณไม่มีสิทธิ์ใช้ปุ่มนี้", ephemeral=True)
             return
+        
+        await interaction.response.defer(ephemeral=True)
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT `value` FROM settings WHERE `key` = 'target_channel_id'")
@@ -416,19 +562,60 @@ class AdminControlView(discord.ui.View):
             ch = interaction.guild.get_channel(int(row[0]))
             if ch:
                 target_channel = ch
+
         active_msgs = []
         async for msg in target_channel.history(limit=30):
-            if msg.author == bot.user and msg.embeds and "ระบบเช็คชื่อแคลน" in msg.embeds[0].title and "[ปิดรับแล้ว]" not in msg.embeds[0].title:
-                active_msgs.append(msg)
+            if msg.author == bot.user and msg.embeds:
+                embed_title = msg.embeds[0].title or ""
+                embed_desc = msg.embeds[0].description or ""
+                if "ระบบเช็คชื่อแคลนประจำวัน" in embed_title and "สำหรับวันที่ปัจจุบัน" in embed_desc and "[ปิดรับแล้ว]" not in embed_title:
+                    active_msgs.append(msg)
+
         if not active_msgs:
-            await interaction.response.send_message(f"❌ ไม่พบรายการเช็คชื่อที่เปิดอยู่ในห้อง {target_channel.mention}", ephemeral=True)
+            await interaction.followup.send(f"❌ ไม่พบรายการเช็คชื่อที่กำลังเปิดอยู่", ephemeral=True)
             return
+
         view = SelectMessageToCloseView(active_msgs, target_channel, interaction.guild)
-        await interaction.response.send_message("🔒 เลือกรายการเช็คชื่อที่ต้องการปิดรับและส่งสรุปผลทันที:", view=view, ephemeral=True)
+        await interaction.followup.send("🔒 เลือกรายการเช็คชื่อที่ต้องการปิดรับและส่งสรุปผลทันที:", view=view, ephemeral=True)
+
+# ⏰ ระบบ Auto-Close ปิดรับอัตโนมัติเมื่อถึงเวลา 03:00 น.
+@tasks.loop(minutes=1)
+async def auto_close_attendance_task():
+    try:
+        now_real = datetime.now(zoneinfo.ZoneInfo("Asia/Bangkok")) if zoneinfo else datetime.now() + timedelta(hours=7)
+        if now_real.hour == 3 and now_real.minute == 0:
+            for guild in bot.guilds:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT `value` FROM settings WHERE `key` = 'target_channel_id'")
+                row = cursor.fetchone()
+                conn.close()
+                
+                if not row or not row[0].isdigit():
+                    continue
+                
+                target_channel = guild.get_channel(int(row[0]))
+                if not target_channel:
+                    continue
+                
+                async for msg in target_channel.history(limit=20):
+                    if msg.author == bot.user and msg.embeds:
+                        embed_title = msg.embeds[0].title or ""
+                        embed_desc = msg.embeds[0].description or ""
+                        if "ระบบเช็คชื่อแคลนประจำวัน" in embed_title and "[ปิดรับแล้ว]" not in embed_title:
+                            await disable_attendance_message(msg, guild)
+    except Exception as e:
+        print(f"Auto-close error: {e}")
+
+@auto_close_attendance_task.before_loop
+async def before_auto_close():
+    await bot.wait_until_ready()
 
 @bot.event
 async def on_ready():
     print(f"🤖 Bot ออนไลน์แล้วในชื่อ: {bot.user.name}")
+    if not auto_close_attendance_task.is_running():
+        auto_close_attendance_task.start()
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -440,6 +627,7 @@ async def แผงควบคุม(ctx):
             "• **📌 ตั้งค่าห้องเช็คชื่อ**: เลือกห้องส่งปุ่มเช็คชื่อ\n"
             "• **📊 ตั้งค่าห้องสรุปผล**: เลือกห้องส่งสรุปผล\n"
             "• **🏷️ ตั้งค่ายศแคลน**: เลือกยศ หรือใส่ Role ID\n"
+            "• **📝 เช็คชื่อให้สมาชิก**: เลือกสมาชิกเพื่อกรอกสถานะ/วันที่/สาเหตุ\n"
             "• **🟢 เปิดเช็คชื่อทันที**: เปิดระบบเช็คชื่อด้วยตัวเองทันที\n"
             "• **🔒 ปิดรับเช็คชื่อ**: เลือกปิดรับและสรุปผลทันที"
         ),
@@ -486,8 +674,9 @@ def dashboard():
         return redirect(url_for("login"))
 
     sort_by = request.args.get("sort", "come")
-    today_db, today_disp, default_month = parse_date_input("")
+    _, today_disp, default_month = parse_date_input("")
     selected_month = request.args.get("month", default_month)
+    selected_date = request.args.get("filter_date", "")
 
     summary_data = []
     raw_logs = []
@@ -510,32 +699,57 @@ def dashboard():
         elif sort_by == "absent":
             order_column = "absent_cnt"
 
-        # ดึงสรุปผลแบบรวมทั้งหมด (ไม่กรองเดือน เพื่อให้แสดงผลข้อมูลที่มีอยู่ชัวร์ๆ 100%)
         cursor.execute(f'''
-            SELECT user_id, username,
-                   SUM(CASE WHEN status = 'มา' THEN 1 ELSE 0 END) as come_cnt,
-                   SUM(CASE WHEN status = 'ลา' THEN 1 ELSE 0 END) as leave_cnt,
-                   SUM(CASE WHEN status = 'ขาด' THEN 1 ELSE 0 END) as absent_cnt
-            FROM attendance
-            GROUP BY user_id, username
-            ORDER BY {order_column} DESC, username ASC
-        ''')
+            SELECT a.user_id,
+                   COALESCE(m.discord_tag, a.username) as display_name,
+                   SUM(CASE WHEN a.status = 'มา' THEN 1 ELSE 0 END) as come_cnt,
+                   SUM(CASE WHEN a.status = 'ลา' THEN 1 ELSE 0 END) as leave_cnt,
+                   SUM(CASE WHEN a.status = 'ขาด' THEN 1 ELSE 0 END) as absent_cnt
+            FROM attendance a
+            LEFT JOIN members m ON a.user_id = m.user_id
+            WHERE a.month_year = %s
+            GROUP BY a.user_id, display_name
+            ORDER BY {order_column} DESC, display_name ASC
+        ''', (selected_month,))
         summary_data = cursor.fetchall()
 
-        # ดึงประวัติรายการทั้งหมดมาแสดง
-        cursor.execute("SELECT id, username, status, note, date, date_display FROM attendance ORDER BY id DESC")
+        # 🟢 กรองรายการย่อยตามวันที่ถ้าเลือกช่อง filter_date
+        if selected_date:
+            filter_date_db, _, _ = parse_date_input(selected_date)
+            cursor.execute('''
+                SELECT a.id,
+                       COALESCE(m.discord_tag, a.username) as display_name,
+                       a.status, a.note, a.date, a.date_display
+                FROM attendance a
+                LEFT JOIN members m ON a.user_id = m.user_id
+                WHERE a.date = %s
+                ORDER BY a.id DESC
+            ''', (filter_date_db,))
+        else:
+            cursor.execute('''
+                SELECT a.id,
+                       COALESCE(m.discord_tag, a.username) as display_name,
+                       a.status, a.note, a.date, a.date_display
+                FROM attendance a
+                LEFT JOIN members m ON a.user_id = m.user_id
+                WHERE a.month_year = %s
+                ORDER BY a.id DESC
+                LIMIT 50
+            ''', (selected_month,))
+
         raw_logs = cursor.fetchall()
         conn.close()
     except Exception as e:
         print(f"Dashboard Error: {e}")
 
-    return render_template("dashboard.html", summary=summary_data, logs=raw_logs, months=months, current_month=selected_month, current_sort=sort_by, today_disp=today_disp)
+    return render_template("dashboard.html", summary=summary_data, logs=raw_logs, months=months, 
+                           current_month=selected_month, current_sort=sort_by, today_disp=today_disp, selected_date=selected_date)
 
 @app.route("/delete_log/<int:log_id>", methods=["POST"])
 def delete_log(log_id):
     if not session.get("logged_in"):
         return redirect(url_for("login"))
-    current_month = request.form.get("current_month", datetime.now().strftime("%Y-%m"))
+    current_month = request.form.get("current_month", get_thai_now().strftime("%Y-%m"))
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -551,7 +765,7 @@ def delete_log(log_id):
 def review_absent():
     if not session.get("logged_in"):
         return redirect(url_for("login"))
-    today_db, today_disp, month_year = parse_date_input("")
+    today_db, today_disp, _ = parse_date_input("")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT user_id, discord_tag FROM members ORDER BY discord_tag ASC")
@@ -619,27 +833,64 @@ def members_management():
     cursor = conn.cursor()
     if request.method == "POST":
         action = request.form.get("action")
-        user_id = request.form.get("user_id", "").strip()
-        discord_tag = request.form.get("discord_tag", "").strip()
         try:
-            if action == "save" and user_id and discord_tag:
-                cursor.execute('''
-                    INSERT INTO members (user_id, discord_tag) VALUES (%s, %s)
-                    ON DUPLICATE KEY UPDATE discord_tag=%s
-                ''', (user_id, discord_tag, discord_tag))
-                conn.commit()
-                flash("✅ บันทึกรายชื่อสมาชิกเรียบร้อยแล้ว!")
-            elif action == "delete" and user_id:
-                cursor.execute("DELETE FROM members WHERE user_id = %s", (user_id,))
-                conn.commit()
-                flash("🗑️ ลบรายชื่อสมาชิกเรียบร้อยแล้ว!")
+            if action == "save":
+                user_id = request.form.get("user_id", "").strip()
+                discord_tag = request.form.get("discord_tag", "").strip()
+                if user_id and discord_tag:
+                    cursor.execute('''
+                        INSERT INTO members (user_id, discord_tag) VALUES (%s, %s)
+                        ON DUPLICATE KEY UPDATE discord_tag=%s
+                    ''', (user_id, discord_tag, discord_tag))
+                    cursor.execute("UPDATE attendance SET username = %s WHERE user_id = %s", (discord_tag, user_id))
+                    conn.commit()
+                    flash("✅ บันทึกรายชื่อสมาชิกเรียบร้อยแล้ว!")
+            elif action == "delete":
+                user_id = request.form.get("user_id", "").strip()
+                if user_id:
+                    cursor.execute("DELETE FROM members WHERE user_id = %s", (user_id,))
+                    conn.commit()
+                    flash("🗑️ ลบรายชื่อสมาชิกเรียบร้อยแล้ว!")
+            elif action == "sync_role":
+                conn_guild = bot.guilds[0] if bot.guilds else None
+                if conn_guild:
+                    cursor.execute("SELECT `value` FROM settings WHERE `key` = 'clan_role_id'")
+                    role_row = cursor.fetchone()
+                    if role_row and role_row[0].isdigit():
+                        role = conn_guild.get_role(int(role_row[0]))
+                        if role:
+                            added = 0
+                            for m in role.members:
+                                if not m.bot:
+                                    cursor.execute('''
+                                        INSERT INTO members (user_id, discord_tag) VALUES (%s, %s)
+                                        ON DUPLICATE KEY UPDATE discord_tag=%s
+                                    ''', (str(m.id), m.display_name, m.display_name))
+                                    added += 1
+                            conn.commit()
+                            flash(f"🔄 ซิงค์สมาชิกจากยศ {role.name} สำเร็จทั้งหมด {added} คน!")
+                        else:
+                            flash("❌ ไม่พบยศแคลนที่ตั้งค่าไว้ในเซิร์ฟเวอร์")
+                    else:
+                        flash("❌ ยังไม่ได้ตั้งค่ายศแคลนในระบบ")
+                else:
+                    flash("❌ บอทยังไม่เชื่อมต่อกับเซิร์ฟเวอร์ Discord")
         except Exception as e:
             conn.rollback()
             flash(f"❌ เกิดข้อผิดพลาด: {e}")
+
     cursor.execute("SELECT user_id, discord_tag FROM members ORDER BY discord_tag ASC")
     members_list = cursor.fetchall()
+    
+    guild_members = []
+    if bot.guilds:
+        g = bot.guilds[0]
+        for mem in g.members:
+            if not mem.bot:
+                guild_members.append({"user_id": str(mem.id), "name": mem.display_name})
+
     conn.close()
-    return render_template("members.html", members=members_list)
+    return render_template("members.html", members=members_list, guild_members=guild_members)
 
 @app.route("/update_log", methods=["POST"])
 def update_log():
@@ -666,7 +917,7 @@ def update_log():
 def clear_all():
     if not session.get("logged_in"):
         return redirect(url_for("login"))
-    current_month = request.form.get("current_month", datetime.now().strftime("%Y-%m"))
+    current_month = request.form.get("current_month", get_thai_now().strftime("%Y-%m"))
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -685,13 +936,14 @@ def export_csv():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT username,
-               SUM(CASE WHEN status = 'มา' THEN 1 ELSE 0 END) as come_cnt,
-               SUM(CASE WHEN status = 'ลา' THEN 1 ELSE 0 END) as leave_cnt,
-               SUM(CASE WHEN status = 'ขาด' THEN 1 ELSE 0 END) as absent_cnt
-        FROM attendance
-        GROUP BY user_id, username
-        ORDER BY come_cnt DESC, username ASC
+        SELECT COALESCE(m.discord_tag, a.username) as display_name,
+               SUM(CASE WHEN a.status = 'มา' THEN 1 ELSE 0 END) as come_cnt,
+               SUM(CASE WHEN a.status = 'ลา' THEN 1 ELSE 0 END) as leave_cnt,
+               SUM(CASE WHEN a.status = 'ขาด' THEN 1 ELSE 0 END) as absent_cnt
+        FROM attendance a
+        LEFT JOIN members m ON a.user_id = m.user_id
+        GROUP BY a.user_id, display_name
+        ORDER BY come_cnt DESC, display_name ASC
     ''')
     rows = cursor.fetchall()
     conn.close()

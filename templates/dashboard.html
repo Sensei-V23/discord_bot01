@@ -2,199 +2,222 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>Clan Attendance Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบเช็คชื่อแคลน - Dashboard</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <style> body { font-family: 'Kanit', sans-serif; } </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen p-6 md:p-8">
-    <div class="max-w-6xl mx-auto space-y-6">
-        
-        <!-- Top Bar -->
-        <div class="bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-                <h1 class="text-2xl font-bold text-sky-400">📊 ระบบหลังบ้านสรุปการเช็คชื่อแคลน</h1>
-                <p class="text-slate-400 text-xs mt-1">จัดการข้อมูลสถิติและการเช็คชื่อแคลน</p>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+
+    <!-- Header / Navbar -->
+    <nav class="bg-slate-800/80 backdrop-blur border-b border-slate-700 sticky top-0 z-50 px-6 py-4">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="Clan Logo" class="w-10 h-10 rounded-full border border-sky-500/40 object-cover shadow-lg" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
+                <div>
+                    <h1 class="text-xl font-bold text-sky-400">ระบบเช็คชื่อแคลน</h1>
+                    <p class="text-xs text-slate-400">Clan Attendance Dashboard</p>
+                </div>
             </div>
 
-            <form method="GET" action="/" class="flex items-center gap-3 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 shadow-inner">
-                <label for="month" class="text-sm font-medium text-slate-300">📅 เลือกเดือน:</label>
-                <select name="month" id="month" onchange="this.form.submit()" class="bg-slate-900 border border-slate-700 text-sky-400 rounded-lg px-3 py-1.5 font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500/30 text-sm">
+            <div class="flex items-center gap-4">
+                <a href="{{ url_for('dashboard') }}" class="text-sky-400 font-semibold text-sm hover:underline">📊 สรุปผล</a>
+                <a href="{{ url_for('members_management') }}" class="text-slate-300 hover:text-white text-sm">👥 จัดการสมาชิก</a>
+                <a href="{{ url_for('review_absent') }}" class="text-slate-300 hover:text-white text-sm">⚠️ ตรวจสอบคนขาด</a>
+                <a href="{{ url_for('export_csv') }}" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">📥 โหลด CSV</a>
+                <a href="{{ url_for('logout') }}" class="bg-red-600/80 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition">🚪 ออกจากระบบ</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="max-w-7xl mx-auto px-6 py-8">
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}
+              <div class="mb-6 p-4 rounded-xl bg-sky-900/50 border border-sky-500/50 text-sky-200 text-sm shadow-md">
+                {{ message }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-white">📊 สรุปผลการเช็คชื่อสมาชิก</h2>
+            <form method="GET" class="flex gap-2 items-center">
+                <label class="text-sm text-slate-400">เดือน:</label>
+                <select name="month" onchange="this.form.submit()" class="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-sm">
                     {% for m in months %}
-                    <option value="{{ m }}" {% if m == current_month %}selected{% endif %}>{{ m }}</option>
+                        <option value="{{ m }}" {% if m == current_month %}selected{% endif %}>{{ m }}</option>
                     {% endfor %}
                 </select>
             </form>
         </div>
 
-        {% with messages = get_flashed_messages() %}
-          {% if messages %}
-            <div class="bg-sky-500/10 border border-sky-500/25 text-sky-300 p-4 rounded-xl text-sm font-medium shadow-lg flex items-center gap-3">
-              <span>🔔</span>
-              <div>
-                {% for message in messages %}
-                  <p>{{ message }}</p>
-                {% endfor %}
-              </div>
-            </div>
-          {% endif %}
-        {% endwith %}
-
-        <!-- Toolbar Buttons -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <a href="/review_absent" class="text-center bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/25 text-xs font-semibold py-3 px-4 rounded-2xl transition shadow-xl flex flex-col items-center justify-center gap-1">
-                <span class="text-base">👀</span>
-                <span>เช็คคนไม่มาวันนี้ <span class="text-[10px] text-amber-300/80 font-normal">({{ today_disp }})</span></span>
-            </a>
-            <a href="/members" class="text-center bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/25 text-xs font-semibold py-3 px-4 rounded-2xl transition shadow-xl flex flex-col items-center justify-center gap-1">
-                <span class="text-base">👥</span>
-                <span>จัดการรายชื่อสมาชิก</span>
-            </a>
-            <a href="/logout" class="text-center bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-semibold py-3 px-4 rounded-2xl transition shadow-xl flex flex-col items-center justify-center gap-1">
-                <span class="text-base">🚪</span>
-                <span>ออกจากระบบหลังบ้าน</span>
-            </a>
+        <!-- ตารางสรุปผล -->
+        <div class="bg-slate-800/60 border border-slate-700/80 rounded-2xl overflow-hidden shadow-xl mb-10">
+            <table class="w-full text-left text-sm text-slate-300">
+                <thead class="bg-slate-800 text-slate-400 border-b border-slate-700 text-xs uppercase">
+                    <tr>
+                        <th class="px-6 py-4">ชื่อสมาชิก Discord</th>
+                        <th class="px-6 py-4 text-center">✅ มา</th>
+                        <th class="px-6 py-4 text-center">📌 ลา</th>
+                        <th class="px-6 py-4 text-center">❌ ขาด</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/50">
+                    {% for row in summary %}
+                    <tr class="hover:bg-slate-700/30 transition">
+                        <td class="px-6 py-4 font-semibold text-white">{{ row[1] }}</td>
+                        <td class="px-6 py-4 text-center text-emerald-400 font-bold">{{ row[2] }}</td>
+                        <td class="px-6 py-4 text-center text-amber-400 font-bold">{{ row[3] }}</td>
+                        <td class="px-6 py-4 text-center text-rose-400 font-bold">{{ row[4] }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="px-6 py-8 text-center text-slate-500">ยังไม่มีข้อมูลการเช็คชื่อในเดือนนี้</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
 
-        <!-- Section 1: Summary -->
-        <div class="bg-slate-900/80 backdrop-blur rounded-2xl p-6 border border-slate-800 shadow-xl">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                <div>
-                    <h2 class="text-xl font-semibold text-sky-300">🏆 สรุปสถิติจำนวนครั้งทั้งหมด</h2>
-                </div>
+        <!-- ประวัติการลงชื่อย่อย พร้อมฟิลเตอร์กรองวันที่ -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+            <h3 class="text-xl font-bold text-white">📜 รายการลงชื่อล่าสุด</h3>
+            
+            <!-- ฟอร์มเลือกกรองตามวันที่ -->
+            <form method="GET" action="{{ url_for('dashboard') }}" class="flex items-center gap-2">
+                <input type="hidden" name="month" value="{{ current_month }}">
+                <label class="text-xs text-slate-400">กรองตามวันที่:</label>
+                <input type="date" name="filter_date" value="{{ selected_date or '' }}" onchange="this.form.submit()" 
+                       class="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500">
                 
-                <div class="flex flex-wrap items-center gap-3">
-                    <button onclick="copyMonthlySummary()" class="bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/25 text-xs font-semibold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
-                        📋 คัดลอกสรุปส่ง Discord
-                    </button>
-
-                    <a href="/export_csv" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/25 text-xs font-semibold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
-                        📥 โหลดรายงาน CSV
-                    </a>
-
-                    <div class="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                        <span class="text-slate-400 px-2 font-medium">เรียงตาม:</span>
-                        <a href="/?sort=come" class="px-3 py-1.5 rounded-lg font-semibold transition {% if current_sort == 'come' %} bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 {% else %} text-slate-400 hover:text-slate-200 {% endif %}">✅ มา</a>
-                        <a href="/?sort=leave" class="px-3 py-1.5 rounded-lg font-semibold transition {% if current_sort == 'leave' %} bg-amber-500/20 text-amber-400 border border-amber-500/30 {% else %} text-slate-400 hover:text-slate-200 {% endif %}">📌 ลา</a>
-                        <a href="/?sort=absent" class="px-3 py-1.5 rounded-lg font-semibold transition {% if current_sort == 'absent' %} bg-rose-500/20 text-rose-400 border border-rose-500/30 {% else %} text-slate-400 hover:text-slate-200 {% endif %}">❌ ขาด</a>
-                    </div>
-                </div>
-            </div>
-
-            <div class="overflow-x-auto">
-                <table id="summaryTable" class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="border-b border-slate-800 text-slate-400 text-sm">
-                            <th class="py-3 px-4">ชื่อสมาชิก Discord</th>
-                            <th class="py-3 px-4 text-center">✅ มา</th>
-                            <th class="py-3 px-4 text-center">📌 ลา</th>
-                            <th class="py-3 px-4 text-center">❌ ขาด</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800/60 text-sm">
-                        {% for row in summary %}
-                        <tr class="hover:bg-slate-800/40 transition">
-                            <td class="py-3.5 px-4 font-medium text-slate-200">{{ row[1] }}</td>
-                            <td class="py-3.5 px-4 text-center font-bold text-emerald-400">{{ row[2] }}</td>
-                            <td class="py-3.5 px-4 text-center font-bold text-amber-400">{{ row[3] }}</td>
-                            <td class="py-3.5 px-4 text-center font-bold text-rose-400">{{ row[4] }}</td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="4" class="text-center py-8 text-slate-500">ไม่มีข้อมูลการเช็คชื่อ</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                {% if selected_date %}
+                <a href="{{ url_for('dashboard', month=current_month) }}" class="bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs px-3 py-1.5 rounded-lg transition">🔄 ล้างตัวกรอง</a>
+                {% endif %}
+            </form>
         </div>
 
-        <!-- Section 2: Edit & Delete Logs -->
-        <div class="bg-slate-900/80 backdrop-blur rounded-2xl p-6 border border-slate-800 shadow-xl">
-            <h2 class="text-xl font-semibold text-sky-300 mb-4">⚙️ แก้ไขสถานะ / วันที่ / หมายเหตุย้อนหลัง</h2>
-
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse text-sm">
-                    <thead>
-                        <tr class="border-b border-slate-800 text-slate-400">
-                            <th class="py-3 px-4">ชื่อสมาชิก</th>
-                            <th class="py-3 px-4">วันที่ (วัน/เดือน/ปี)</th>
-                            <th class="py-3 px-4">สถานะ</th>
-                            <th class="py-3 px-4">สาเหตุ / หมายเหตุ</th>
-                            <th class="py-3 px-4 text-center">การจัดการ</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800/60">
-                        {% for log in logs %}
-                        <tr class="hover:bg-slate-800/40 transition">
-                            <td class="py-3.5 px-4 font-semibold text-slate-200">{{ log[1] }}</td>
+        <div class="bg-slate-800/60 border border-slate-700/80 rounded-2xl overflow-hidden shadow-xl">
+            <table class="w-full text-left text-sm text-slate-300">
+                <thead class="bg-slate-800 text-slate-400 border-b border-slate-700 text-xs uppercase">
+                    <tr>
+                        <th class="px-6 py-4">วันที่</th>
+                        <th class="px-6 py-4">ชื่อสมาชิก</th>
+                        <th class="px-6 py-4">สถานะ</th>
+                        <th class="px-6 py-4">หมายเหตุ</th>
+                        <th class="px-6 py-4 text-right">จัดการ</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700/50">
+                    {% for log in logs %}
+                    <tr class="hover:bg-slate-700/30 transition">
+                        <td class="px-6 py-4 text-slate-400">{{ log[5] }}</td>
+                        <td class="px-6 py-4 font-medium text-white">{{ log[1] }}</td>
+                        <td class="px-6 py-4">
+                            {% if log[2] == 'มา' %}
+                                <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full text-xs font-semibold">✅ มา</span>
+                            {% elif log[2] == 'ลา' %}
+                                <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-full text-xs font-semibold">📌 ลา</span>
+                            {% else %}
+                                <span class="bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-1 rounded-full text-xs font-semibold">❌ ขาด</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 text-slate-400">{{ log[3] if log[3] else '-' }}</td>
+                        <td class="px-6 py-4 text-right flex justify-end gap-2">
+                            <!-- ปุ่มแก้ไข -->
+                            <button type="button" 
+                                    data-id="{{ log[0] }}"
+                                    data-username="{{ log[1] }}"
+                                    data-status="{{ log[2] }}"
+                                    data-note="{{ log[3] if log[3] else '' }}"
+                                    data-date="{{ log[5] }}"
+                                    onclick="openEditModalFromButton(this)" 
+                                    class="text-sky-400 hover:text-sky-300 text-xs font-medium bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20 hover:bg-sky-500/20 transition">✏️ แก้ไข</button>
                             
-                            <form method="POST" action="/update_log">
-                                <input type="hidden" name="log_id" value="{{ log[0] }}">
+                            <!-- ปุ่มลบ -->
+                            <form action="{{ url_for('delete_log', log_id=log[0]) }}" method="POST" onsubmit="return confirm('ยืนยันลบรายการนี้?');" class="inline">
                                 <input type="hidden" name="current_month" value="{{ current_month }}">
-                                
-                                <td class="py-3.5 px-4">
-                                    <input type="text" name="date_display" value="{{ log[5] }}" class="bg-slate-950 border border-slate-700 text-xs rounded-xl px-3 py-2 text-sky-400 font-semibold w-32 text-center focus:outline-none focus:ring-1 focus:ring-sky-500">
-                                </td>
-
-                                <td class="py-3.5 px-4">
-                                    <select name="status" class="bg-slate-950 border border-slate-700 text-xs rounded-xl px-3 py-2 text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-sky-500">
-                                        <option value="มา" {% if log[2] == 'มา' %}selected{% endif %}>✅ มา</option>
-                                        <option value="ลา" {% if log[2] == 'ลา' %}selected{% endif %}>📌 ลา</option>
-                                        <option value="ขาด" {% if log[2] == 'ขาด' %}selected{% endif %}>❌ ขาด</option>
-                                    </select>
-                                </td>
-
-                                <td class="py-3.5 px-4">
-                                    <input type="text" name="note" value="{{ log[3] if log[3] else '' }}" placeholder="ระบุสาเหตุ..." class="bg-slate-950 border border-slate-700 text-xs rounded-xl px-3 py-2 text-slate-200 w-44 focus:outline-none focus:ring-1 focus:ring-sky-500">
-                                </td>
-
-                                <td class="py-3.5 px-4 text-center">
-                                    <div class="flex items-center justify-center gap-2">
-                                        <button type="submit" class="bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium px-3.5 py-2 rounded-xl transition shadow-sm">
-                                            💾 บันทึก
-                                        </button>
+                                <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs font-medium bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 hover:bg-rose-500/20 transition">🗑️ ลบ</button>
                             </form>
-                                        <form method="POST" action="/delete_log/{{ log[0] }}" onsubmit="return confirm('⚠️ คุณต้องการลบรายการเช็คชื่อนี้ใช่หรือไม่?');" style="display:inline;">
-                                            <input type="hidden" name="current_month" value="{{ current_month }}">
-                                            <button type="submit" class="bg-rose-500/10 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 text-xs p-2 rounded-xl transition shadow-sm" title="ลบรายการนี้">
-                                                🗑️
-                                            </button>
-                                        </form>
-                                    </div>
-                                </td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="5" class="text-center py-8 text-slate-500">ไม่มีรายการเช็คชื่อ</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="px-6 py-8 text-center text-slate-500">ไม่พบประวัติการลงชื่อในวันที่เลือก</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal หน้าต่างป๊อบอัพสำหรับแก้ไขข้อมูล -->
+    <div id="editModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="bg-slate-800 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl text-slate-100">
+            <h3 class="text-lg font-bold text-white mb-4">✏️ แก้ไขรายการลงชื่อ</h3>
+            <form action="{{ url_for('update_log') }}" method="POST" class="space-y-4">
+                <input type="hidden" id="edit_log_id" name="log_id">
+                <input type="hidden" name="current_month" value="{{ current_month }}">
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">ชื่อสมาชิก</label>
+                    <input type="text" id="edit_username" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-400 text-sm" readonly>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">วันที่ (เช่น 16/10/2026)</label>
+                    <input type="text" id="edit_date_display" name="date_display" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-sky-500" required>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">สถานะ</label>
+                    <select id="edit_status" name="status" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-sky-500">
+                        <option value="มา">✅ มา</option>
+                        <option value="ลา">📌 ลา</option>
+                        <option value="ขาด">❌ ขาด</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">หมายเหตุ / สาเหตุ</label>
+                    <textarea id="edit_note" name="note" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-sky-500" placeholder="ระบุเหตุผล..."></textarea>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-2">
+                    <button type="button" onclick="closeEditModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg text-sm transition">ยกเลิก</button>
+                    <button type="submit" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold rounded-lg text-sm transition">💾 บันทึก</button>
+                </div>
+            </form>
         </div>
     </div>
 
     <script>
-        function copyMonthlySummary() {
-            let text = `📊 สรุปผลการเช็คชื่อแคลนทั้งหมด\n----------------------------------\n`;
-            const rows = document.querySelectorAll("#summaryTable tbody tr");
-            if (rows.length === 1 && rows[0].innerText.includes("ไม่มีข้อมูล")) {
-                alert("❌ ไม่มีข้อมูลสรุป");
-                return;
-            }
-            rows.forEach(tr => {
-                const cols = tr.querySelectorAll("td");
-                if (cols.length >= 4) {
-                    const name = cols[0].innerText.trim();
-                    const come = cols[1].innerText.trim();
-                    const leave = cols[2].innerText.trim();
-                    const absent = cols[3].innerText.trim();
-                    text += `• ${name} ➔ มา: ${come} | ลา: ${leave} | ขาด: ${absent}\n`;
-                }
-            });
-            navigator.clipboard.writeText(text).then(() => {
-                alert("✅ คัดลอกข้อความสรุปเรียบร้อย!");
-            }).catch(err => {
-                alert("❌ ไม่สามารถคัดลอกได้: " + err);
-            });
+        function openEditModalFromButton(btn) {
+            const id = btn.getAttribute('data-id');
+            const username = btn.getAttribute('data-username');
+            const status = btn.getAttribute('data-status');
+            const note = btn.getAttribute('data-note');
+            const dateDisplay = btn.getAttribute('data-date');
+
+            document.getElementById('edit_log_id').value = id;
+            document.getElementById('edit_username').value = username;
+            document.getElementById('edit_status').value = status;
+            document.getElementById('edit_note').value = note;
+            document.getElementById('edit_date_display').value = dateDisplay;
+            
+            const modal = document.getElementById('editModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeEditModal() {
+            const modal = document.getElementById('editModal');
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
         }
     </script>
+
 </body>
 </html>
